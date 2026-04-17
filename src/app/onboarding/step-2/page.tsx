@@ -7,7 +7,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { saveProfileSection } from "@/lib/saveProfileSection";
 import { Button, RadioSection, PageContainer, Text } from "@/components/ui";
 import { COLORS } from "@/lib/theme";
-import { ONBOARDING_STEP_2, MEMBERSHIP_STORAGE_KEY } from "@/config/site";
+import { ONBOARDING_STEP_2 } from "@/config/site";
 import FoundationsNav from "@/components/FoundationsNav";
 
 type BasicInformation = {
@@ -47,7 +47,13 @@ export default function OnboardingFoundationsPage() {
         return;
       }
 
-      if (typeof window !== "undefined" && localStorage.getItem(MEMBERSHIP_STORAGE_KEY) !== "true") {
+      const { data: membership } = await supabase
+        .from("membership")
+        .select("status")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+
+      if (!membership || membership.status !== "approved") {
         router.replace("/membership-access");
         return;
       }

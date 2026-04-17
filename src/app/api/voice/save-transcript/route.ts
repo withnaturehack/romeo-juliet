@@ -38,25 +38,26 @@ export async function POST(req: Request) {
       );
     }
 
-    const updatePayload: Record<string, unknown> = {
+    const upsertPayload: Record<string, unknown> = {
+      user_id: user.id,
       conversation_transcript: transcript,
       voice_conversation_completed: true,
     };
     if (conversationId) {
-      updatePayload.elevenlabs_conversation_id = conversationId;
+      upsertPayload.elevenlabs_conversation_id = conversationId;
     }
 
     let { error: updateError } = await supabase
       .from("profiles")
-      .update(updatePayload)
-      .eq("user_id", user.id);
+      .upsert(upsertPayload, { onConflict: "user_id" });
 
-    // Backward compatibility: some DBs may not have this column yet.
+    // Backward compatibility: some DBs may not have voice_conversation_completed column yet.
     if (
       updateError?.code === "PGRST204" &&
       updateError.message?.includes("voice_conversation_completed")
     ) {
       const fallbackPayload: Record<string, unknown> = {
+        user_id: user.id,
         conversation_transcript: transcript,
       };
       if (conversationId) {
@@ -65,8 +66,7 @@ export async function POST(req: Request) {
 
       ({ error: updateError } = await supabase
         .from("profiles")
-        .update(fallbackPayload)
-        .eq("user_id", user.id));
+        .upsert(fallbackPayload, { onConflict: "user_id" }));
     }
 
     if (updateError) {

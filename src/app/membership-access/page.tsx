@@ -142,6 +142,11 @@ export default function MembershipAccessPage() {
       return;
     }
 
+    // Ensure profile row exists so transcript saves never silently fail
+    await supabase
+      .from("profiles")
+      .upsert({ user_id: session.user.id }, { onConflict: "user_id", ignoreDuplicates: true });
+
     router.replace("/onboarding");
   };
 

@@ -1,7 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
+import julietImage from "@/public/Juliet-faded.png";
+import { supabase } from "@/lib/supabaseClient";
 
 type ChatMessage = {
   id: number;
@@ -50,6 +53,12 @@ export default function JulietChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [input, setInput] = useState("");
 
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) router.replace("/");
+    });
+  }, [router]);
+
   const handleSend = () => {
     const trimmed = input.trim();
     if (!trimmed) return;
@@ -91,10 +100,12 @@ export default function JulietChatPage() {
           </button>
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-full overflow-hidden bg-[#e0e5db]">
-              <img
-                src="/juliet.png"
+              <Image
+                src={julietImage}
                 alt="Juliet"
                 className="w-full h-full object-cover"
+                width={32}
+                height={32}
               />
             </div>
             <div>
@@ -162,10 +173,12 @@ export default function JulietChatPage() {
               <div className="max-w-[80%] flex gap-2 items-end">
                 {isJuliet && (
                   <div className="w-7 h-7 rounded-full overflow-hidden bg-[#e0e5db]">
-                    <img
-                      src="/juliet.png"
+                    <Image
+                      src={julietImage}
                       alt="Juliet"
                       className="w-full h-full object-cover"
+                      width={28}
+                      height={28}
                     />
                   </div>
                 )}

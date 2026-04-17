@@ -44,6 +44,11 @@ function AuthCallbackContent() {
       }
 
       if (membership.status === "approved") {
+        // Ensure profile row exists for this user (safe to run on every login)
+        await supabase
+          .from("profiles")
+          .upsert({ user_id: session.user.id }, { onConflict: "user_id", ignoreDuplicates: true });
+
         const { data: profile } = await supabase
           .from("profiles")
           .select("conversation_transcript, onboarding_step")
