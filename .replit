@@ -1,0 +1,49 @@
+modules = ["nodejs-20"]
+[nix]
+channel = "stable-25_05"
+
+[agent]
+expertMode = true
+
+[deployment]
+run = ["sh", "-c", "npm run dev"]
+deploymentTarget = "cloudrun"
+
+[userenv]
+
+[userenv.shared]
+NEXT_PUBLIC_SUPABASE_URL = "https://rwzqvixxujuiwnqfmnjf.supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ3enF2aXh4dWp1aXducWZtbmpmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA3MTg2NzksImV4cCI6MjA4NjI5NDY3OX0.2XO9NoNFJzP2lXXlRfG_K08LMh8JtiPrSUch-UyV7_0"
+SUPABASE_URL = "https://rwzqvixxujuiwnqfmnjf.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ3enF2aXh4dWp1aXducWZtbmpmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDcxODY3OSwiZXhwIjoyMDg2Mjk0Njc5fQ.zkU0FZtvS6f05M5ZBps3olgD3uJiEqPDOwnF0f5Z9SI"
+SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ3enF2aXh4dWp1aXducWZtbmpmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDcxODY3OSwiZXhwIjoyMDg2Mjk0Njc5fQ.zkU0FZtvS6f05M5ZBps3olgD3uJiEqPDOwnF0f5Z9SI"
+ELEVENLABS_API_KEY = "sk_8816c45430184720f64624b43323dca468303d7ac92185d8"
+GROQ_API_KEY = "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"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev -- -p 5000"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
