@@ -24,26 +24,34 @@ function OnboardingIntro() {
         return;
       }
 
-      const { data } = await supabase
-        .from("profiles")
-        .select("is_complete")
+      const { data: membership } = await supabase
+        .from("membership")
+        .select("status")
         .eq("user_id", session.user.id)
-        .limit(1);
+        .maybeSingle();
 
-      const profile = data?.[0];
-      if (profile?.is_complete) {
+      if (!membership || membership.status !== "approved") {
+        router.replace("/membership-access");
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("conversation_transcript, is_complete")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+
+      const hasVoice =
+        Array.isArray(profile?.conversation_transcript) &&
+        profile.conversation_transcript.length > 0;
+
+      if (hasVoice && profile?.is_complete) {
         router.replace("/home");
         return;
       }
 
-      const { data: member } = await supabase
-        .from("membership")
-        .select("id, status")
-        .eq("user_id", session.user.id)
-        .maybeSingle();
-
-      if (!member || member.status !== "approved") {
-        router.replace("/membership-access");
+      if (hasVoice && !profile?.is_complete) {
+        router.replace("/onboarding/step-2");
         return;
       }
 
@@ -130,7 +138,7 @@ function OnboardingIntro() {
             className="mt-7 inline-flex h-11 w-full max-w-[280px] items-center justify-center rounded-full text-center text-sm font-medium text-white normal-case tracking-normal"
             style={{ backgroundColor: "#55654C", fontFamily: "var(--font-inter), sans-serif" }}
           >
-            Continue
+            Begin 5-min conversation
           </Button>
         </div>
       </section>

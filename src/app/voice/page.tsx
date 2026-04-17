@@ -11,6 +11,14 @@ import { COLORS } from "@/lib/theme";
 
 type TranscriptEntry = { role: "assistant" | "user"; content: string };
 
+const SESSION_DURATION_SECS = 5 * 60;
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 export default function VoicePage() {
   const router = useRouter();
   const [phase, setPhase] = useState<"conversation" | "saving">("conversation");
@@ -20,14 +28,27 @@ export default function VoicePage() {
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [isMicActive, setIsMicActive] = useState(false);
   const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(SESSION_DURATION_SECS);
+  const [timerActive, setTimerActive] = useState(false);
+
   const transcriptEndRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<TranscriptEntry[]>([]);
   const pendingTypedMessagesRef = useRef<string[]>([]);
   const skipSaveOnDisconnectRef = useRef(false);
   const conversationIdRef = useRef<string | undefined>(undefined);
   const hasAutoStartedRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setTimerActive(false);
+  }, []);
 
   const saveTranscriptAndRedirect = useCallback(async () => {
+    stopTimer();
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -39,13 +60,16 @@ export default function VoicePage() {
 
     const latestTranscript = transcriptRef.current;
     if (latestTranscript.length === 0) {
-      router.replace("/");
+      router.replace("/onboarding/step-2");
       return;
     }
 
     setPhase("saving");
     try {
-      const payload = latestTranscript.map((entry) => ({ role: entry.role, content: entry.content }));
+      const payload = latestTranscript.map((entry) => ({
+        role: entry.role,
+        content: entry.content,
+      }));
       const conversationId = conversationIdRef.current;
       const res = await fetch("/api/voice/save-transcript", {
         method: "POST",
@@ -53,17 +77,20 @@ export default function VoicePage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ transcript: payload, ...(conversationId && { conversationId }) }),
+        body: JSON.stringify({
+          transcript: payload,
+          ...(conversationId && { conversationId }),
+        }),
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to save transcript");
-      router.replace("/");
+      router.replace("/onboarding/step-2");
     } catch (err) {
       setError(err instanceof Error ? err.message : VOICE.errorSaveSummary);
       setPhase("conversation");
     }
-  }, [router]);
+  }, [router, stopTimer]);
 
   const conversation = useConversation({
     micMuted: !isMicActive,
@@ -73,9 +100,12 @@ export default function VoicePage() {
       setError(null);
       setIsReconnecting(false);
       setIsMicActive(false);
+      setTimeLeft(SESSION_DURATION_SECS);
+      setTimerActive(true);
     },
     onDisconnect: () => {
       setIsMicActive(false);
+      stopTimer();
       if (skipSaveOnDisconnectRef.current) {
         skipSaveOnDisconnectRef.current = false;
         return;
@@ -83,11 +113,15 @@ export default function VoicePage() {
       saveTranscriptAndRedirect();
     },
     onMessage: (payload) => {
-      const role: "user" | "assistant" = payload.role === "user" ? "user" : "assistant";
+      const role: "user" | "assistant" =
+        payload.role === "user" ? "user" : "assistant";
       const content = (payload.message || "").trim();
       if (!content) return;
 
-      if (role === "user" && pendingTypedMessagesRef.current[0] === content) {
+      if (
+        role === "user" &&
+        pendingTypedMessagesRef.current[0] === content
+      ) {
         pendingTypedMessagesRef.current.shift();
         return;
       }
@@ -102,8 +136,25 @@ export default function VoicePage() {
     onError: (message) => {
       setError(message || "Connection error");
       setIsReconnecting(false);
+      stopTimer();
     },
   });
+
+  useEffect(() => {
+    if (!timerActive) return;
+    timerRef.current = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          conversation.endSession().catch(() => {});
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [timerActive, conversation]);
 
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -167,7 +218,11 @@ export default function VoicePage() {
 
   useEffect(() => {
     if (hasAutoStartedRef.current) return;
-    if (conversation.status !== "disconnected" || phase !== "conversation") return;
+    if (
+      conversation.status !== "disconnected" ||
+      phase !== "conversation"
+    )
+      return;
     hasAutoStartedRef.current = true;
     startConversation();
   }, [conversation.status, phase, startConversation]);
@@ -181,9 +236,13 @@ export default function VoicePage() {
 
     setError(null);
     setIsReconnecting(true);
+    stopTimer();
 
     try {
-      if (conversation.status === "connected" || conversation.status === "connecting") {
+      if (
+        conversation.status === "connected" ||
+        conversation.status === "connecting"
+      ) {
         skipSaveOnDisconnectRef.current = true;
         await conversation.endSession();
       }
@@ -192,10 +251,14 @@ export default function VoicePage() {
     }
 
     await startConversation();
-  }, [conversation, isReconnecting, phase, startConversation]);
+  }, [conversation, isReconnecting, phase, startConversation, stopTimer]);
 
   const handleMicToggle = useCallback(() => {
-    if (conversation.status !== "connected" || phase === "saving" || conversation.isSpeaking) {
+    if (
+      conversation.status !== "connected" ||
+      phase === "saving" ||
+      conversation.isSpeaking
+    ) {
       return;
     }
     setIsMicActive((prev) => !prev);
@@ -223,9 +286,16 @@ export default function VoicePage() {
   }, [appendTranscript, conversation, draft, phase]);
 
   const isSaving = phase === "saving";
+  const isConnected = conversation.status === "connected";
+
+  const timerWarning = timeLeft <= 60 && isConnected;
+  const timerColor = timeLeft <= 60 ? "#c0392b" : "rgba(60,66,56,0.55)";
 
   return (
-    <main className="h-[100svh] overflow-hidden px-3 py-3 sm:px-6 sm:py-6" style={{ background: COLORS.cream }}>
+    <main
+      className="h-[100svh] overflow-hidden px-3 py-3 sm:px-6 sm:py-6"
+      style={{ background: COLORS.cream }}
+    >
       <div className="mx-auto flex h-full w-full max-w-[860px] flex-col rounded-lg border border-[#D1CEC6] bg-[#F3F3F5] p-4 shadow-[0_10px_35px_rgba(40,48,38,0.08)] sm:p-6">
         <div className="mb-5 flex items-center justify-between">
           <button
@@ -234,49 +304,86 @@ export default function VoicePage() {
             className="p-1 text-[#2C312A] hover:opacity-70 transition-opacity"
             aria-label="Go back"
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M15 18L9 12L15 6"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             </svg>
           </button>
 
-          <Image src="/logo.png" alt="Romeo & Juliet" width={78} height={39} className="h-auto w-[78px]" priority />
-        </div>
-
-        <div className="mb-7 hidden items-center justify-center gap-3 text-[13px] sm:flex" style={{ color: "rgba(44,49,42,0.65)", fontFamily: "var(--font-inter), sans-serif" }}>
-          <span className="inline-flex h-3 w-3 rounded-full border-2 border-[#5A694F]" />
-          <div className="h-px w-16 bg-[#BCC0B9]" />
-          <span className="inline-flex h-3 w-3 rounded-full bg-[#BCC0B9]" />
-          <div className="h-px w-16 bg-[#BCC0B9]" />
-          <span className="inline-flex h-3 w-3 rounded-full bg-[#BCC0B9]" />
-          <div className="h-px w-16 bg-[#BCC0B9]" />
-          <span className="inline-flex h-3 w-3 rounded-full bg-[#BCC0B9]" />
+          <Image
+            src="/logo.png"
+            alt="Romeo & Juliet"
+            width={78}
+            height={39}
+            className="h-auto w-[78px]"
+            priority
+          />
         </div>
 
         <section className="mx-auto flex min-h-0 flex-1 w-full max-w-[760px] flex-col">
           <header className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="h-12 w-12 overflow-hidden rounded-full border-2 border-[#5A694F]">
-                <Image src={julietFadedImage} alt="Juliet" width={48} height={48} className="h-full w-full object-cover" />
+                <Image
+                  src={julietFadedImage}
+                  alt="Juliet"
+                  width={48}
+                  height={48}
+                  className="h-full w-full object-cover"
+                />
               </div>
               <div className="flex items-center gap-2">
-                <p className="text-[2rem] leading-none" style={{ color: "#2C312A", fontFamily: "var(--font-playfair), serif" }}>
+                <p
+                  className="text-[2rem] leading-none"
+                  style={{
+                    color: "#2C312A",
+                    fontFamily: "var(--font-playfair), serif",
+                  }}
+                >
                   Juliet
                 </p>
                 <button
                   type="button"
                   onClick={() => setIsSpeakerMuted((prev) => !prev)}
-                  disabled={isSaving || conversation.status !== "connected"}
+                  disabled={isSaving || !isConnected}
                   className="text-[#5A694F] disabled:opacity-45"
-                  aria-label={isSpeakerMuted ? "Unmute Juliet voice" : "Mute Juliet voice"}
+                  aria-label={
+                    isSpeakerMuted
+                      ? "Unmute Juliet voice"
+                      : "Mute Juliet voice"
+                  }
                 >
                   {isSpeakerMuted ? (
-                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="h-5 w-5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                    >
                       <path d="M11 5 6 9H3v6h3l5 4V5Z" />
                       <path d="m22 9-6 6" />
                       <path d="m16 9 6 6" />
                     </svg>
                   ) : (
-                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="h-5 w-5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                    >
                       <path d="M11 5 6 9H3v6h3l5 4V5Z" />
                       <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
                     </svg>
@@ -285,28 +392,61 @@ export default function VoicePage() {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleReconnectVoice}
-              disabled={isSaving || isReconnecting}
-              className="rounded-full border border-[#BCC0B9] px-3 py-1 text-xs text-[#5A694F] hover:bg-[#E9E9EA] disabled:opacity-45"
-              style={{ fontFamily: "var(--font-inter), sans-serif" }}
-            >
-              {isReconnecting ? "Reconnecting..." : "Reconnect"}
-            </button>
+            <div className="flex items-center gap-3">
+              {isConnected && (
+                <div
+                  className={`flex items-center gap-1.5 text-sm font-mono tabular-nums ${timerWarning ? "animate-pulse" : ""}`}
+                  style={{
+                    color: timerColor,
+                    fontFamily: "var(--font-inter), sans-serif",
+                  }}
+                  aria-label={`${formatTime(timeLeft)} remaining`}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                  {formatTime(timeLeft)}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleReconnectVoice}
+                disabled={isSaving || isReconnecting}
+                className="rounded-full border border-[#BCC0B9] px-3 py-1 text-xs text-[#5A694F] hover:bg-[#E9E9EA] disabled:opacity-45"
+                style={{ fontFamily: "var(--font-inter), sans-serif" }}
+              >
+                {isReconnecting ? "Reconnecting..." : "Reconnect"}
+              </button>
+            </div>
           </header>
 
           <main className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
             {transcript.length === 0 ? (
-              <div className="max-w-[58%] rounded-lg border border-[#A8AEA3] bg-[#F4F4F4] px-3 py-2 text-[15px] leading-relaxed text-[#3A4037]" style={{ fontFamily: "var(--font-inter), sans-serif" }}>
-                You can speak naturally. Take your time.
+              <div
+                className="max-w-[58%] rounded-lg border border-[#A8AEA3] bg-[#F4F4F4] px-3 py-2 text-[15px] leading-relaxed text-[#3A4037]"
+                style={{ fontFamily: "var(--font-inter), sans-serif" }}
+              >
+                {isConnected
+                  ? "You can speak naturally. Take your time."
+                  : "Connecting to Juliet…"}
               </div>
             ) : null}
 
             {transcript.map((entry, i) => {
               const isAssistant = entry.role === "assistant";
               return (
-                <div key={`${entry.role}-${i}-${entry.content.slice(0, 24)}`} className={`flex ${isAssistant ? "justify-start" : "justify-end"}`}>
+                <div
+                  key={`${entry.role}-${i}-${entry.content.slice(0, 24)}`}
+                  className={`flex ${isAssistant ? "justify-start" : "justify-end"}`}
+                >
                   <div
                     className={`max-w-[68%] rounded-lg px-3 py-2 text-[15px] leading-relaxed ${
                       isAssistant
@@ -321,7 +461,9 @@ export default function VoicePage() {
               );
             })}
 
-            {error ? <p className="text-sm text-red-700">{error}</p> : null}
+            {error ? (
+              <p className="text-sm text-red-700">{error}</p>
+            ) : null}
             <div ref={transcriptEndRef} />
           </main>
 
@@ -339,7 +481,7 @@ export default function VoicePage() {
                       handleSendText();
                     }
                   }}
-                  disabled={conversation.status !== "connected" || isSaving}
+                  disabled={!isConnected || isSaving}
                   placeholder="Type here"
                   className="h-full flex-1 bg-transparent text-sm text-[#343A32] placeholder:text-[#8A8F88] focus:outline-none disabled:opacity-50"
                   style={{ fontFamily: "var(--font-inter), sans-serif" }}
@@ -347,11 +489,17 @@ export default function VoicePage() {
                 <button
                   type="button"
                   onClick={handleSendText}
-                  disabled={!draft.trim() || conversation.status !== "connected" || isSaving}
+                  disabled={!draft.trim() || !isConnected || isSaving}
                   className="text-[#80867E] disabled:opacity-40"
                   aria-label="Send message"
                 >
-                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                  >
                     <path d="M22 2 11 13" />
                     <path d="m22 2-7 20-4-9-9-4Z" />
                   </svg>
@@ -360,13 +508,19 @@ export default function VoicePage() {
 
               <button
                 type="button"
-                disabled={conversation.status !== "connected" || isSaving || conversation.isSpeaking}
+                disabled={!isConnected || isSaving || conversation.isSpeaking}
                 onClick={handleMicToggle}
                 className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition disabled:opacity-40 ${isMicActive ? "bg-[#41503B] text-white" : "bg-[#55654C] text-white"}`}
                 aria-label={isMicActive ? "Stop listening" : "Start listening"}
                 title={isMicActive ? "Tap when done" : "Tap to speak"}
               >
-                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                >
                   <path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3Z" />
                   <path d="M19 11a7 7 0 0 1-14 0" />
                   <path d="M12 18v3" />
@@ -374,18 +528,30 @@ export default function VoicePage() {
               </button>
             </div>
 
-            <p className="mt-3 text-center text-sm" style={{ color: "rgba(60,66,56,0.55)", fontFamily: "var(--font-inter), sans-serif" }}>
-              {isSaving ? VOICE.statusSaving : "Your conversation is private and secure"}
+            <p
+              className="mt-3 text-center text-sm"
+              style={{
+                color: isSaving
+                  ? "#55654C"
+                  : "rgba(60,66,56,0.55)",
+                fontFamily: "var(--font-inter), sans-serif",
+              }}
+            >
+              {isSaving
+                ? VOICE.statusSaving
+                : isConnected
+                  ? "Your conversation is private and secure"
+                  : "Connecting…"}
             </p>
 
             <button
               type="button"
               onClick={handleEndSession}
-              disabled={isSaving || conversation.status !== "connected"}
-              className="mx-auto mt-3 block rounded-full border border-[#B8BCB5] px-4 py-1 text-xs text-[#5A694F] disabled:opacity-40"
+              disabled={isSaving || !isConnected}
+              className="mx-auto mt-3 block rounded-full border border-[#B8BCB5] px-5 py-1.5 text-xs text-[#5A694F] hover:bg-[#E9E9EA] transition-colors disabled:opacity-40"
               style={{ fontFamily: "var(--font-inter), sans-serif" }}
             >
-              End + Save
+              End + Continue to profile
             </button>
           </footer>
         </section>

@@ -43,29 +43,34 @@ function AuthCallbackContent() {
         return;
       }
 
-      if (membership.status === "approved") {
-        // Ensure profile row exists for this user (safe to run on every login)
-        await supabase
-          .from("profiles")
-          .upsert({ user_id: session.user.id }, { onConflict: "user_id", ignoreDuplicates: true });
+      if (membership.status !== "approved") {
+        router.replace("/home");
+        return;
+      }
 
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("conversation_transcript, onboarding_step")
-          .eq("user_id", session.user.id)
-          .maybeSingle();
+      await supabase
+        .from("profiles")
+        .upsert(
+          { user_id: session.user.id },
+          { onConflict: "user_id", ignoreDuplicates: true }
+        );
 
-        const hasCompletedVoice =
-          Array.isArray(profile?.conversation_transcript) &&
-          profile.conversation_transcript.length > 0;
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("conversation_transcript, is_complete")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
 
-        if (hasCompletedVoice) {
-          router.replace("/home");
-        } else if (profile?.onboarding_step && profile.onboarding_step >= 2) {
-          router.replace("/onboarding/step-2");
-        } else {
-          router.replace("/onboarding");
-        }
+      const hasCompletedVoice =
+        Array.isArray(profile?.conversation_transcript) &&
+        profile.conversation_transcript.length > 0;
+
+      const isProfileComplete = profile?.is_complete === true;
+
+      if (!hasCompletedVoice) {
+        router.replace("/onboarding");
+      } else if (!isProfileComplete) {
+        router.replace("/onboarding/step-2");
       } else {
         router.replace("/home");
       }

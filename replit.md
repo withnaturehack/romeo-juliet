@@ -1,7 +1,19 @@
 # Romeo & Juliet — Matchmaking App
 
 ## Overview
-High-end matchmaking app built on Next.js 16 (App Router), Supabase, and ElevenLabs. Users speak with an AI agent named Juliet, then get curated introductions — one at a time.
+High-end matchmaking app built on Next.js 16 (App Router), Supabase, and ElevenLabs. Users speak with an AI agent named Juliet (5-minute timed session), complete their profile, then receive curated human-admin introductions — one at a time. Both parties must accept before messaging opens.
+
+## User Flow
+1. Landing `/` → Login (magic link)
+2. `/auth/callback` → checks membership status + profile completeness → routes accordingly
+3. `/onboarding` → Juliet intro screen → `/voice` (5-min ElevenLabs voice chat)
+4. Voice ends → transcript saved → `/onboarding/step-2` (profile form, multiple steps)
+5. Profile complete → `/home` (match pipeline: waiting state or active introduction)
+6. Accept introduction → mutual accept → `/chat/[matchId]` (real-time messaging)
+
+## Admin API (protected by `ADMIN_SECRET` header `x-admin-secret`)
+- `POST /api/admin/approve-member` — approve/reject membership + sends email
+- `POST /api/admin/create-match` — create introduction between two approved members + sends emails
 
 ## Tech Stack
 - **Framework**: Next.js 16.1.6 (App Router, Turbopack)
