@@ -1,0 +1,357 @@
+You are building the Romeo & Juliet matchmaking app. Next.js 14+ with 
+Supabase and ElevenLabs. I will give you the exact tasks with subtasks.
+Complete them IN ORDER. Do not skip ahead.
+
+Repo: https://github.com/romeojulietlovee-bit/romeo-juliet
+
+# ABSOLUTE RULES
+1. This is the MAIN USER-FACING app only. No admin dashboard pages.
+2. Every database query uses `user_id` to reference auth.users — NEVER `id`
+3. No `any` types in TypeScript — type everything properly
+4. Every page must handle: loading state, error state, empty state
+5. Mobile-first responsive design (test at 375px width)
+6. NO localStorage for critical state — everything in Supabase
+7. Test after EVERY subtask — do not batch changes
+8. API keys only in server env vars — never in client code
+9. All SQL must be idempotent (safe to run multiple times)
+10. Use Tailwind CSS for styling, Framer Motion for animations
+11. Every form must prevent double submission
+12. Every button that calls an API must show loading spinner + disable
+13. Every save/submit must show success toast or error message
+
+# TECH STACK
+- Next.js 14+ (App Router)
+- TypeScript (strict)
+- Supabase (Auth, Database, Storage, Realtime)
+- ElevenLabs (Voice conversation)
+- Tailwind CSS
+- Framer Motion (install: npm install framer-motion)
+- Resend for emails (install: npm install resend)
+
+# ENV VARIABLES (.env.local)
+NEXT_PUBLIC_SUPABASE_URL=<supabase_url>
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<supabase_anon_key>
+SUPABASE_SERVICE_ROLE_KEY=<service_role_key>
+ELEVENLABS_API_KEY=<elevenlabs_key>
+RESEND_API_KEY=<resend_key>
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+
+================================================================
+STEP 0: DATABASE SETUP (Run these SQL migrations FIRST)
+================================================================
+
+Run ALL of these in Supabase SQL Editor before touching any code.
+
+# Migration 1: Fix profiles table
+
+ALTER TABLE profiles 
+ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE;
+
+UPDATE profiles SET user_id = id WHERE user_id IS NULL;
+
+DO $$ BEGIN
+  BEGIN ALTER TABLE profiles ALTER COLUMN user_id SET NOT NULL;
+  EXCEPTION WHEN others THEN NULL; END;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'profiles_user_id_unique'
+  ) THEN
+    ALTER TABLE profiles ADD CONSTRAINT profiles_user_id_unique UNIQUE (user_id);
+  END IF;
+END $$;
+
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now() NOT NULL;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now() NOT NULL;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS email text;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS email_notifications boolean DEFAULT true;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS onboarding_step integer DEFAULT 0;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS onboarding_completed_at timestamptz;
+
+CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN NEW.updated_at = now(); RETURN NEW; END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS profiles_updated_at ON profiles;
+CREATE TRIGGER profiles_updated_at
+BEFORE UPDATE ON profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles(user_id);
+
+-- Fix RLS
+DO $$ DECLARE pol RECORD; BEGIN
+  FOR pol IN SELECT policyname FROM pg_policies WHERE tablename = 'profiles'
+  LOOP EXECUTE format('DROP POLICY IF EXISTS %I ON profiles', pol.policyname);
+  END LOOP;
+END $$;
+
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users_read_own_profile" ON profiles FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "users_insert_own_profile" ON profiles FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "users_update_own_profile" ON profiles FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+
+# Migration 2: Membership table
+
+CREATE TABLE IF NOT EXISTS membership (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL UNIQUE,
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','applied')),
+  referral_code_used text,
+  application_data jsonb,
+  applied_at timestamptz DEFAULT now(),
+  approved_at timestamptz,
+  created_at timestamptz DEFAULT now() NOT NULL,
+  updated_at timestamptz DEFAULT now() NOT NULL
+);
+ALTER TABLE membership ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users_read_own_membership" ON membership FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "users_insert_own_membership" ON membership FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE INDEX IF NOT EXISTS idx_membership_user_id ON membership(user_id);
+DROP TRIGGER IF EXISTS membership_updated_at ON membership;
+CREATE TRIGGER membership_updated_at BEFORE UPDATE ON membership FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+
+# Migration 3: Matches table
+
+CREATE TABLE IF NOT EXISTS matches (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  matched_user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  match_score integer,
+  match_decision text DEFAULT 'pending' CHECK (match_decision IN ('pending','approved','rejected','expired')),
+  compatibility_summary text,
+  strengths jsonb,
+  tensions jsonb,
+  dealbreakers jsonb,
+  match_reason text,
+  archetype_dynamic text,
+  introduced_at timestamptz,
+  status text DEFAULT 'pending_review' CHECK (status IN ('pending_review','introduced','accepted_by_user','accepted_by_match','active','declined','expired')),
+  created_at timestamptz DEFAULT now() NOT NULL,
+  updated_at timestamptz DEFAULT now() NOT NULL,
+  CONSTRAINT unique_match_pair UNIQUE (user_id, matched_user_id)
+);
+ALTER TABLE matches ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users_read_own_matches" ON matches FOR SELECT USING (auth.uid() = user_id OR auth.uid() = matched_user_id);
+CREATE POLICY "users_update_own_match_status" ON matches FOR UPDATE USING (auth.uid() = user_id OR auth.uid() = matched_user_id);
+CREATE INDEX IF NOT EXISTS idx_matches_user_id ON matches(user_id);
+CREATE INDEX IF NOT EXISTS idx_matches_matched_user_id ON matches(matched_user_id);
+DROP TRIGGER IF EXISTS matches_updated_at ON matches;
+CREATE TRIGGER matches_updated_at BEFORE UPDATE ON matches FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+
+# Migration 4: Messages table
+
+CREATE TABLE IF NOT EXISTS messages (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  match_id uuid REFERENCES matches(id) ON DELETE CASCADE NOT NULL,
+  sender_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  content text NOT NULL CHECK (char_length(content) <= 2000),
+  read_at timestamptz,
+  created_at timestamptz DEFAULT now() NOT NULL
+);
+ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users_read_match_messages" ON messages FOR SELECT USING (
+  EXISTS (SELECT 1 FROM matches WHERE matches.id = messages.match_id AND (matches.user_id = auth.uid() OR matches.matched_user_id = auth.uid()))
+);
+CREATE POLICY "users_send_match_messages" ON messages FOR INSERT WITH CHECK (
+  auth.uid() = sender_id AND EXISTS (SELECT 1 FROM matches WHERE matches.id = messages.match_id AND matches.status = 'active' AND (matches.user_id = auth.uid() OR matches.matched_user_id = auth.uid()))
+);
+CREATE INDEX IF NOT EXISTS idx_messages_match_id ON messages(match_id);
+CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
+ALTER PUBLICATION supabase_realtime ADD TABLE messages;
+
+
+# Migration 5: Notifications table
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  type text NOT NULL CHECK (type IN ('new_match','match_accepted','match_declined','new_message','membership_approved','system')),
+  title text NOT NULL,
+  body text NOT NULL,
+  link text,
+  read boolean DEFAULT false,
+  created_at timestamptz DEFAULT now() NOT NULL
+);
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users_read_own_notifications" ON notifications FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "users_update_own_notifications" ON notifications FOR UPDATE USING (auth.uid() = user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id) WHERE read = false;
+
+
+# Migration 6: Reports table
+
+CREATE TABLE IF NOT EXISTS reports (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  reporter_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  reported_user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  match_id uuid REFERENCES matches(id) ON DELETE SET NULL,
+  reason text NOT NULL CHECK (reason IN ('harassment','spam','inappropriate','fake_profile','other')),
+  details text,
+  status text DEFAULT 'pending' CHECK (status IN ('pending','reviewed','action_taken','dismissed')),
+  created_at timestamptz DEFAULT now() NOT NULL
+);
+ALTER TABLE reports ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users_insert_reports" ON reports FOR INSERT WITH CHECK (auth.uid() = reporter_id);
+
+
+================================================================
+STEP 1: CORE LIBRARY FILES (Build before any pages)
+================================================================
+
+# File: src/types/database.ts
+Create ALL TypeScript interfaces for: Profile, Membership, Match, 
+Message, Notification, Report. Every field typed. No `any`.
+Include the new fields: onboarding_step, onboarding_completed_at.
+
+# File: src/lib/supabaseClient.ts
+Browser client using NEXT_PUBLIC_SUPABASE_URL and 
+NEXT_PUBLIC_SUPABASE_ANON_KEY. Handle missing vars with clear error.
+
+# File: src/lib/supabaseAdmin.ts  
+Server-only client using SUPABASE_SERVICE_ROLE_KEY.
+Add comment: "NEVER import this in client components"
+
+# File: src/lib/saveProfileSection.ts — COMPLETE REWRITE
+- Single upsert using user_id: 
+  supabase.from('profiles').upsert({ user_id, ...data }, { onConflict: 'user_id' })
+- NO fallback logic trying different columns
+- Throw on error with Supabase error details
+- Return updated row
+- Typed with Profile interface
+
+# File: src/lib/auth-helpers.ts
+- getAuthenticatedUser(supabase) → user or null
+- getMembershipStatus(supabase, userId) → status string or null
+- getOnboardingStep(supabase, userId) → number (0 if no profile)
+- requireAuth(supabase) → user or throws
+
+# File: src/lib/email.ts
+Using Resend. Wrap in try/catch — email failure never breaks app.
+If RESEND_API_KEY missing, console.warn and skip.
+
+# File: src/lib/email-templates.ts
+Branded HTML email functions:
+- membershipApprovedEmail(userName)
+- membershipAppliedEmail(userName)
+- newMatchEmail(userName)
+- matchAcceptedEmail(userName, matchName)
+- newMessageEmail(userName)
+Each: responsive HTML, single CTA button, warm branding, 
+unsubscribe footer. Never include sensitive data.
+
+# File: src/lib/notifications.ts
+Helper: createNotification(supabase, userId, type, title, body, link?)
+
+# File: src/lib/photo-validation.ts
+export function validatePhoto(file: File): string | null {
+  const ALLOWED = ['image/jpeg','image/png','image/webp'];
+  const MAX_SIZE = 5 * 1024 * 1024;
+  if (!ALLOWED.includes(file.type)) return 'Upload JPG, PNG, or WebP only';
+  if (file.size > MAX_SIZE) return 'Photo must be under 5MB';
+  return null;
+}
+
+# File: src/lib/onboarding-validation.ts
+Validation functions for each onboarding step:
+
+export function validateStep1(data: any): { valid: boolean; errors: Record<string, string> } {
+  const errors: Record<string, string> = {};
+  if (!data.display_name?.trim()) errors.display_name = 'Name is required';
+  if (data.display_name?.length > 50) errors.display_name = 'Name must be under 50 characters';
+  // age: must be 18+
+  if (!data.age || data.age < 18) errors.age = 'You must be 18 or older';
+  if (data.age > 100) errors.age = 'Please enter a valid age';
+  // gender required
+  if (!data.gender) errors.gender = 'Please select your gender';
+  // sexual_orientation required
+  if (!data.sexual_orientation) errors.sexual_orientation = 'Please select your orientation';
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
+export function validateStep2Section(sectionKey: string, data: any): { valid: boolean; errors: Record<string, string> } {
+  const errors: Record<string, string> = {};
+  // Each section must have at least one answered field
+  const answered = Object.values(data).filter(v => v !== null && v !== '' && v !== undefined);
+  if (answered.length === 0) errors[sectionKey] = 'Please answer at least one question';
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
+export function validateStep3(photos: { main: File | string | null; photo2?: File | string | null; photo3?: File | string | null }): { valid: boolean; errors: Record<string, string> } {
+  const errors: Record<string, string> = {};
+  if (!photos.main) errors.main = 'At least one photo is required';
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
+# File: src/components/ui/Toast.tsx
+Toast notification system:
+- Position: bottom-center mobile, bottom-right desktop
+- Types: success (green), error (red), info (blue), warning (amber)
+- Auto-dismiss after 4 seconds
+- Slide up + fade in (Framer Motion)
+- Close button
+- Stack multiple toasts
+
+# File: src/lib/useToast.ts
+Custom hook: const { showToast } = useToast();
+
+# File: src/lib/useSubmit.ts
+Anti-double-submit hook:
+function useSubmit() {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const handleSubmit = async (fn: () => Promise<void>) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try { await fn(); } finally { setIsSubmitting(false); }
+  };
+  return { isSubmitting, handleSubmit };
+}
+
+# File: src/components/ui/Button.tsx
+Reusable button with built-in:
+- loading prop → spinner + disabled
+- variant: primary, secondary, danger, ghost
+- size: sm, md, lg
+- fullWidth option
+- Scale 0.97 on active press
+- Disabled state styling (opacity-50 cursor-not-allowed)
+
+# File: src/components/ui/LoadingSpinner.tsx
+Simple spinning circle. Props: size (sm, md, lg), color.
+
+# File: src/components/ui/Skeleton.tsx
+Shimmer loading skeleton. Props: width, height, rounded.
+
+# File: src/components/ui/ErrorState.tsx
+Full-page error: icon, friendly message, retry button, go home link.
+
+# File: src/components/ui/EmptyState.tsx
+Icon/illustration, title, subtitle, optional CTA button.
+
+# File: src/components/ui/ProgressBar.tsx
+Animated progress bar for onboarding. Props: currentStep, totalSteps.
+Shows step numbers with active/completed/upcoming states.
+Animated width transition between steps.
+
+
+================================================================
+TASK 1: COMPLETE ONBOARDING FLOW END-TO-END
+================================================================
+
+This is the MOST IMPORTANT task. The entire product depends on 
+users smoothly going from landing → signup → membership → 
+onboarding → voice → profile complete → waiting for match.
+
+Every screen must be polished, validated, and bulletproof.
+
+## THE COMPLETE USER JOURNEY (build every screen in this order)
+
+### SCREEN 1: Landing Page
+File: src/app/page.tsx (UPDATE existing)
+
+First, determine user state and route accordingly:

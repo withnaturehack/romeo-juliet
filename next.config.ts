@@ -2,9 +2,11 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: [
-    "7d7f93b4-db65-4826-aeea-e455b689bc8b-00-1lrau9euq0jdb.pike.replit.dev",
     "*.replit.dev",
+    "*.replit.app",
     "*.pike.replit.dev",
+    "*.janeway.replit.dev",
+    "*.kirk.replit.dev",
   ],
   images: {
     remotePatterns: [
