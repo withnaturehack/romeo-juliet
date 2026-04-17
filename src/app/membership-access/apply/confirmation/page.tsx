@@ -6,7 +6,7 @@ import Image from "next/image";
 import logoImage from "@/public/logo.png";
 import { supabase } from "@/lib/supabaseClient";
 import { MEMBERSHIP } from "@/config/site";
-import { Button, PageContainer, Text } from "@/components/ui";
+import { Button, PageContainer, Text, LoadingSpinner } from "@/components/ui";
 import { COLORS } from "@/lib/theme";
 
 export default function MembershipApplyConfirmationPage() {
@@ -33,7 +33,10 @@ export default function MembershipApplyConfirmationPage() {
   if (checking) {
     return (
       <PageContainer className="flex items-center justify-center">
-        <Text>Loading...</Text>
+        <div className="flex flex-col items-center gap-3">
+          <LoadingSpinner />
+          <Text className="text-sm" style={{ color: "rgba(38,45,37,0.6)" }}>Loading...</Text>
+        </div>
       </PageContainer>
     );
   }

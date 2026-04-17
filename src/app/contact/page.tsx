@@ -78,9 +78,15 @@ export default function Contact() {
                 {("email" in section) && typeof section.email === "string" && (
                   <p
                     className="pt-1 text-[0.98rem] font-semibold sm:text-[1.03rem]"
-                    style={{ color: "rgba(38,45,37,0.9)", fontFamily: "var(--font-inter), sans-serif" }}
+                    style={{ fontFamily: "var(--font-inter), sans-serif" }}
                   >
-                    {section.email}
+                    <a
+                      href={`mailto:${section.email}`}
+                      className="underline underline-offset-2 transition-opacity hover:opacity-70"
+                      style={{ color: "rgba(38,45,37,0.9)" }}
+                    >
+                      {section.email}
+                    </a>
                   </p>
                 )}
 

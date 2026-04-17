@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import { saveProfileSection } from "@/lib/saveProfileSection";
-import { Button, RadioSection, PageContainer, Text } from "@/components/ui";
+import { Button, RadioSection, PageContainer, Text, LoadingSpinner } from "@/components/ui";
 import { COLORS } from "@/lib/theme";
 import { ONBOARDING_STEP_2 } from "@/config/site";
 import FoundationsNav from "@/components/FoundationsNav";
@@ -152,7 +152,10 @@ export default function OnboardingFoundationsPage() {
   if (loading) {
     return (
       <PageContainer className="flex items-center justify-center">
-        <Text>{ONBOARDING_STEP_2.loading}</Text>
+        <div className="flex flex-col items-center gap-3">
+          <LoadingSpinner className="border-white/30 border-t-white/80" />
+          <Text className="text-sm text-white/60">{ONBOARDING_STEP_2.loading}</Text>
+        </div>
       </PageContainer>
     );
   }

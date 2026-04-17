@@ -120,9 +120,9 @@ function OnboardingIntro() {
             className="mt-6 text-sm leading-relaxed sm:text-[15px]"
             style={{ color: "rgba(38,45,37,0.62)", fontFamily: "var(--font-inter), sans-serif" }}
           >
-            Write your response.<br />
-            You can come back to this conversation at any time.<br />
-            This conversation is private
+            Speak naturally — there are no right answers.<br />
+            You can return to this conversation any time.<br />
+            Everything stays private.
           </p>
 
           <Button

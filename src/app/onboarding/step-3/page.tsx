@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { Button, Input, Text, Divider, PageContainer } from "@/components/ui";
+import { Button, Input, Text, Divider, PageContainer, LoadingSpinner } from "@/components/ui";
 import { PHOTO_GUIDANCE } from "@/config/site";
 import { COLORS } from "@/lib/theme";
 
@@ -131,7 +131,7 @@ export default function OnboardingStep3Page() {
           { onConflict: "user_id" }
         );
       if (upsertError) throw upsertError;
-      router.replace("/voice");
+      router.replace("/home");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -142,7 +142,10 @@ export default function OnboardingStep3Page() {
   if (loading) {
     return (
       <PageContainer className="flex items-center justify-center">
-        <Text>Loading…</Text>
+        <div className="flex flex-col items-center gap-3">
+          <LoadingSpinner className="border-white/30 border-t-white/80" />
+          <Text className="text-sm text-white/60">Loading…</Text>
+        </div>
       </PageContainer>
     );
   }

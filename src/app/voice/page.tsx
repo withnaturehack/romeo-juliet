@@ -296,7 +296,7 @@ export default function VoicePage() {
             </button>
           </header>
 
-          <main className="min-h-0 flex-1 space-y-3 overflow-hidden pr-1">
+          <main className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
             {transcript.length === 0 ? (
               <div className="max-w-[58%] rounded-lg border border-[#A8AEA3] bg-[#F4F4F4] px-3 py-2 text-[15px] leading-relaxed text-[#3A4037]" style={{ fontFamily: "var(--font-inter), sans-serif" }}>
                 You can speak naturally. Take your time.

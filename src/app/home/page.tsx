@@ -6,7 +6,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import { HOME } from "@/config/site";
 import type { User } from "@supabase/supabase-js";
-import { Text, PageContainer } from "@/components/ui";
+import { Text, PageContainer, LoadingSpinner } from "@/components/ui";
 import { COLORS } from "@/lib/theme";
 
 export default function HomePage() {
@@ -53,7 +53,10 @@ export default function HomePage() {
   if (loading) {
     return (
       <PageContainer className="flex items-center justify-center">
-        <Text>{HOME.loading}</Text>
+        <div className="flex flex-col items-center gap-3">
+          <LoadingSpinner className="border-white/30 border-t-white/80" />
+          <Text className="text-sm text-white/60">{HOME.loading}</Text>
+        </div>
       </PageContainer>
     );
   }
