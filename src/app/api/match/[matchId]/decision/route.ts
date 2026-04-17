@@ -32,10 +32,10 @@ export async function POST(
 
   const { data: match, error: matchError } = await supabaseAdmin
     .from("matches")
-    .select("id, status, user_id, matched_user_id, user_decision, matched_user_decision")
+    .select("id, status, user_id, matched_user_id, user_decision, matched_user_decision, introduced_at")
     .eq("id", matchId)
     .eq("user_id", user.id)
-    .maybeSingle();
+    .maybeSingle() as { data: { id: string; status: string; user_id: string; matched_user_id: string; user_decision: string | null; matched_user_decision: string | null; introduced_at: string | null } | null; error: unknown };
 
   if (matchError || !match) {
     return NextResponse.json({ error: "Match not found" }, { status: 404 });

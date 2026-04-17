@@ -21,6 +21,7 @@ SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdX
 ELEVENLABS_API_KEY = "sk_8816c45430184720f64624b43323dca468303d7ac92185d8"
 GROQ_API_KEY = "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"
 NEXT_PUBLIC_APP_URL = "https://romeojuliet.love"
+ADMIN_SECRET = "rj_admin_5psxw5ey6hlsvm1w2"
 
 [workflows]
 runButton = "Project"
