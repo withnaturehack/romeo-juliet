@@ -6,8 +6,9 @@ channel = "stable-25_05"
 expertMode = true
 
 [deployment]
-run = ["sh", "-c", "npm run dev"]
-deploymentTarget = "cloudrun"
+run = ["npm", "run", "start"]
+deploymentTarget = "autoscale"
+build = ["npm", "run", "build"]
 
 [userenv]
 
